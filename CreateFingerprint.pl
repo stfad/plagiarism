@@ -7,6 +7,7 @@ use Data::Dumper;
 use Digest::MD5 qw(md5_hex);
 use LCS;
 use Text::CSV;
+use Text::CSV_XS;
 
 my $filename = shift @ARGV;
 
@@ -47,26 +48,29 @@ sub create_fingerprint($) {
     push(@sentences, $sentence_buf);
     undef($sentence_buf);
   }
+=comment
   print "Sentences:\n";
   print Dumper(@sentences);
   print "Formulas:\n";
   print Dumper(@formulas);
+=cut
   filter_arrays(\@sentences,\@formulas);
   my $hash = convert_arrays_to_hash(\@sentences,\@formulas);
   return $hash;
 }
 
+=comment
 sub parse_file($) {
   my $file = shift;
   my @sentences = ();
   my @formulas = ();
   my $multiline = 0;
 
-  open(my $fh, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
+  open(my $in, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
   my $formula_buf, my $sentence_buf;
   my $flag = 0; # are we reading a formula?
 
-  while (my $row = <$fh>) {
+  while (my $row = <$in>) {
     chomp $row;
     $row =~ s/\$\$/\$/g; # $$ -> $
     $row =~ s/\n//g; # remove \n
@@ -96,9 +100,10 @@ sub parse_file($) {
       }
     }
   }
-  close($fh) || die "Could't close file properly";
+  close($in) || die "Could't close file properly";
   return (\@sentences, \@formulas);
 }
+=cut
 
 sub filter_arrays($;$) {
   my $s_ref = shift;
@@ -109,6 +114,26 @@ sub filter_arrays($;$) {
     $str =~ s/[.,!?:;#_]//g; # remove signs
     $str =~ s/\s+//g; # remove spaces
     $str = uc($str); # UPPER CASE
+    $str =~ s/TEXTCOLOR//g; # remove \textcolor
+    $str =~ s/RED//g; # remove color:
+    $str =~ s/GREEN//g;
+    $str =~ s/BLUE//g;
+    $str =~ s/CYAN//g;
+    $str =~ s/MAGENTA//g;
+    $str =~ s/YELLOW//g;
+    $str =~ s/BLACK//g;
+    $str =~ s/GRAY//g;
+    $str =~ s/WHITE//g;
+    $str =~ s/DARKGRAY//g;
+    $str =~ s/LIGHTGRAY//g;
+    $str =~ s/BROWN//g;
+    $str =~ s/LIME//g;
+    $str =~ s/OLIVE//g;
+    $str =~ s/ORANGE//g;
+    $str =~ s/PINK//g;
+    $str =~ s/PURPLE//g;
+    $str =~ s/TEAL//g;
+    $str =~ s/VIOLET//g;
   }
   for my $str (@$f_ref) {
     $str =~ s/\$//g;
@@ -119,6 +144,26 @@ sub filter_arrays($;$) {
     $str =~ s/\\ //g; # remove \ 
     $str =~ s/\\QUAD//g; # remove \quad 
     $str =~ s/\\QQUAD//g; # remove \qquad 
+    $str =~ s/TEXTCOLOR//g; # remove \textcolor
+    $str =~ s/RED//g; # remove color:
+    $str =~ s/GREEN//g;
+    $str =~ s/BLUE//g;
+    $str =~ s/CYAN//g;
+    $str =~ s/MAGENTA//g;
+    $str =~ s/YELLOW//g;
+    $str =~ s/BLACK//g;
+    $str =~ s/GRAY//g;
+    $str =~ s/WHITE//g;
+    $str =~ s/DARKGRAY//g;
+    $str =~ s/LIGHTGRAY//g;
+    $str =~ s/BROWN//g;
+    $str =~ s/LIME//g;
+    $str =~ s/OLIVE//g;
+    $str =~ s/ORANGE//g;
+    $str =~ s/PINK//g;
+    $str =~ s/PURPLE//g;
+    $str =~ s/TEAL//g;
+    $str =~ s/VIOLET//g;
     $str =~ s/\\ALPHA/G/g; # greek
     $str =~ s/\\BETA/G/g;
     $str =~ s/\\GAMMA/G/g;
@@ -177,22 +222,25 @@ sub convert_arrays_to_hash($;$) {
 
 sub parse_csv($) {
   my $file = shift;
-  my $csv = Text::CSV->new({ sep_char => ',' });
+  if (index($file, ".csv") == -1) {
+    die "This program can work only with .csv, but received '$file' $!";
+  }
+  my $csv = Text::CSV->new({ sep_char => ',', eol => $/ });
+  my $new_csv = $file;
+  $new_csv =~ s/\.csv/_new\.csv/;
 
-  open(my $fh, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
-  while (my $fields = $csv->getline($fh)) {
+  open(my $in, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
+  open(my $out, '>:encoding(UTF-8)', $new_csv) or die "Could not open file '$new_csv' $!";
+  while (my $fields = $csv->getline($in)) {
     my $tasknum = $fields->[0];
     my $author = $fields->[1];
     my $date = $fields->[2];
     my $comment = $fields->[3];
-    print "tasknum: $tasknum\n";
-    print "author: $author\n";
-    print "date: $date\n";
-    print "comment: $comment\n";
-    my $fingerprint = create_fingerprint($comment);
-    print "fingerprint: $fingerprint\n";
+    push @$fields, create_fingerprint($comment);
+    $csv->print($out, $fields);
   }
-  close($fh) || die "Could't close file properly";
+  close($in) || die "Could't close file properly";
+  close($out) || die "Could't close file properly";
 }
 
 
