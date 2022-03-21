@@ -11,6 +11,8 @@ use Text::CSV_XS;
 
 my $filename = shift @ARGV;
 
+my @solutions = ();
+
 sub create_fingerprint($) {
   my $comment = shift;
   my @sentences = ();
@@ -236,13 +238,58 @@ sub parse_csv($) {
     my $author = $fields->[1];
     my $date = $fields->[2];
     my $comment = $fields->[3];
-    push @$fields, create_fingerprint($comment);
+    my $fingerprint = create_fingerprint($comment);
+    push @$fields, $fingerprint;
     $csv->print($out, $fields);
+    my @arr = ($tasknum, $author, $date, $comment, $fingerprint);
+    push(@solutions, \@arr);
   }
   close($in) || die "Could't close file properly";
   close($out) || die "Could't close file properly";
 }
 
+
+sub min($;$) {
+  my $a = shift, my $b = shift;
+  if ($a <= $b) {
+    return $a;
+  }
+  return $b;
+}
+
+sub compare_fingerprints() {
+  my $size = scalar @solutions;
+#  print "size = $size\n";
+  for (my $i = 0; $i < $size; $i = $i + 1) {
+    print STDERR (($i/$size)*100)."%\n";
+    my $s1ref = $solutions[$i];
+#    print "s1ref = $s1ref\n";
+    my @sol1 = @{$s1ref};
+    for (my $j = $i + 1; $j < $size; $j = $j + 1) {
+      my $s2ref = $solutions[$j];
+#      print "s2ref = $s2ref \n";
+      my @sol2 = @{$s2ref};
+#      print "sol[$i]: ".Dumper(@sol1);
+#      print "sol[$j]: ".Dumper(@sol2);
+      if (($sol1[0] eq $sol2[0]) and ($sol1[1] ne $sol2[1])) { # the same task, different authors
+        my @hash1 = split(//, $sol1[4]); # string to array
+        my @hash2 = split(//, $sol2[4]);
+        my $llcs = LCS->LLCS(\@hash1, \@hash2);
+        my $l1 = scalar @hash1;
+        my $l2 = scalar @hash2;
+        my $percentage = min(($llcs/$l1)*100, ($llcs/$l2)*100);
+        if ($percentage > 80) {
+          print "Coincidence: $sol1[0], $sol1[1], $sol2[1]: $percentage %\n";
+          print "sol1: $sol1[3]\n";
+          print "sol2: $sol2[3]\n";
+          print "hash1: $sol1[4]\n";
+          print "hash2: $sol2[4]\n";
+        }
+      }
+#      print "$i <-> $j\n";
+    }
+  }
+}
 
 sub main()
 {
@@ -255,6 +302,8 @@ sub main()
 #  filter_arrays($s_ref, $f_ref);
 #  my $hash = convert_arrays_to_hash($s_ref, $f_ref);
 #  print "$hash\n";
+#  print Dumper(@solutions);
+  compare_fingerprints();
   exit 0;
 }
 

@@ -37,3 +37,4 @@ inc/
 # Test data
 *.txt
 *.csv
+*.log
