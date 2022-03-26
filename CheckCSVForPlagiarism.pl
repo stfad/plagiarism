@@ -366,11 +366,11 @@ main();
 __END__
 =head1 NAME
 
-CreateFingerprint.pl - utility to calculate the percentage of plagiarism in solutions from nsuhw.ru
+CheckCSVForPlagiarism.pl - utility to calculate the percentage of plagiarism in solutions from nsuhw.ru
 
 =head1 SYNOPSIS
 
-CreateFingerprint.pl filename
+CheckCSVForPlagiarism.pl filename
 
 this script can work only with the CSV of this structure:
 
