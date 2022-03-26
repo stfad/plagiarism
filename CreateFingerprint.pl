@@ -9,7 +9,7 @@ use LCS;
 use Text::CSV;
 use Text::CSV_XS;
 use Time::Piece;
-
+use Pod::Usage;
 
 my $filename = shift @ARGV;
 
@@ -317,6 +317,7 @@ sub read_tasks_to_skip() {
 sub main()
 {
   if (not defined $filename) {
+    pod2usage(1);
     die "Filename is not specified\n";
   }
   print "Working with the file $filename\n";
@@ -327,3 +328,19 @@ sub main()
 }
 
 main();
+
+__END__
+=head1 NAME
+
+CreateFingerprint.pl - utility to calculate the percentage of plagiarism in solutions from nsuhw.ru
+
+=head1 SYNOPSIS
+
+Usage:
+CreateFingerprint.pl filename
+
+this script can work only with the CSV of this structure:
+
+task_number, author, create_date, comment
+
+=cut
