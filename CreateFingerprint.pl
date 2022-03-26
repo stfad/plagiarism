@@ -8,10 +8,16 @@ use Digest::MD5 qw(md5_hex);
 use LCS;
 use Text::CSV;
 use Text::CSV_XS;
+use Time::Piece;
+
 
 my $filename = shift @ARGV;
 
 my @solutions = ();
+
+my @tasks_to_skip = ();
+
+my $tasks_to_skip_filename = "trivialtasks.cfg";
 
 sub create_fingerprint($) {
   my $comment = shift;
@@ -21,6 +27,7 @@ sub create_fingerprint($) {
   my $flag = 0;
 
   $comment =~ s/\$\$/\$/g; # $$ -> $
+  $comment =~ s/\!\[ImageFile\]\(.*?\)/IMG/g; # non-greedy search for image names
   $comment =~ s/\\n//g; # remove \n
   $comment =~ s/\n//g; # remove \n
   $comment =~ s/\\r//g; # remove \r
@@ -50,62 +57,9 @@ sub create_fingerprint($) {
     push(@sentences, $sentence_buf);
     undef($sentence_buf);
   }
-=comment
-  print "Sentences:\n";
-  print Dumper(@sentences);
-  print "Formulas:\n";
-  print Dumper(@formulas);
-=cut
   filter_arrays(\@sentences,\@formulas);
-  my $hash = convert_arrays_to_hash(\@sentences,\@formulas);
-  return $hash;
+  return merge_arrays(\@sentences,\@formulas); # returns statement string and formula string
 }
-
-=comment
-sub parse_file($) {
-  my $file = shift;
-  my @sentences = ();
-  my @formulas = ();
-  my $multiline = 0;
-
-  open(my $in, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
-  my $formula_buf, my $sentence_buf;
-  my $flag = 0; # are we reading a formula?
-
-  while (my $row = <$in>) {
-    chomp $row;
-    $row =~ s/\$\$/\$/g; # $$ -> $
-    $row =~ s/\n//g; # remove \n
-
-    if (($row =~/\$/) or $flag == 1) { # row contains formula
-      foreach my $char (split //, $row) {
-        if ($char eq "\$") { # border of the formula of the form $...$
-          $formula_buf=$formula_buf.$char;
-          if (!$flag and defined($sentence_buf)) { # was a sentence and got a formula
-            push(@sentences, $sentence_buf);
-            undef($sentence_buf);
-          }
-          if ($flag and defined($formula_buf)) { # formula ended
-            push(@formulas, $formula_buf);
-            undef($formula_buf);
-          }
-          $flag=!$flag;
-        } elsif ($flag) {
-          $formula_buf=$formula_buf.$char;
-        } else {
-          $sentence_buf=$sentence_buf.$char;
-        }
-      }
-      if (defined($sentence_buf)) {
-        push(@sentences, $sentence_buf);
-        undef($sentence_buf);
-      }
-    }
-  }
-  close($in) || die "Could't close file properly";
-  return (\@sentences, \@formulas);
-}
-=cut
 
 sub filter_arrays($;$) {
   my $s_ref = shift;
@@ -207,19 +161,17 @@ sub filter_arrays($;$) {
   }
 }
 
-sub convert_arrays_to_hash($;$) {
+sub merge_arrays($;$) {
   my $s_ref = shift;
   my $f_ref = shift;
-  my $result;
+  my $s_result, my $f_result;
   for my $buf (@$s_ref) {
-    $result=$result.$buf;
+    $s_result=$s_result.$buf;
   }
   for my $buf (@$f_ref) {
-    $result=$result.$buf;
+    $f_result=$f_result.$buf;
   }
-#  print "res = $result \n";
-#  $result=md5_hex($result);
-  return $result;
+  return $s_result, $f_result;
 }
 
 sub parse_csv($) {
@@ -237,11 +189,12 @@ sub parse_csv($) {
     my $tasknum = $fields->[0];
     my $author = $fields->[1];
     my $date = $fields->[2];
+    $date =~ s/\.[0-9]{6}\+[0-9]{2}:[0-9]{2}//g; # remove microseconds and timezone
     my $comment = $fields->[3];
-    my $fingerprint = create_fingerprint($comment);
-    push @$fields, $fingerprint;
+    (my $s_fingerprint, my $f_fingerprint) = create_fingerprint($comment);
+    push @$fields, $s_fingerprint, $f_fingerprint; # let's add a fingerprint columns to the new csv
     $csv->print($out, $fields);
-    my @arr = ($tasknum, $author, $date, $comment, $fingerprint);
+    my @arr = ($tasknum, $author, $date, $comment, $s_fingerprint, $f_fingerprint);
     push(@solutions, \@arr);
   }
   close($in) || die "Could't close file properly";
@@ -257,38 +210,108 @@ sub min($;$) {
   return $b;
 }
 
+# calculates percentage for two nullable arguments
+# usage: percentage($l1, $l2, $llcs)
+sub percentage($;$;$) {
+  my $arg1 = shift;
+  my $arg2 = shift;
+  my $llcs = shift;
+  if (not defined($llcs)) {
+    $llcs = 0;
+  }
+
+  if ((defined $arg1) and ($arg1 != 0)) {
+    if ((defined $arg2) and ($arg2 != 0)) {
+      return min(($llcs/$arg1)*100, ($llcs/$arg2)*100); 
+    }
+    return ($llcs/$arg1)*100;
+  } elsif ($arg2 != 0) {
+    return ($llcs/$arg2)*100;
+  }
+  return 0; 
+}
+
+# calculates llcs for two nullable strings
+sub calculate_llcs($;$) {
+  my $str1 = shift;
+  my $str2 = shift;
+
+  if (((not defined($str1)) or (not defined($str2)))  or (length($str1) == 0 or length($str2) == 0)) {
+    return 0;
+  }
+  my @hash1 = split(//, $str1); # string to array
+  my @hash2 = split(//, $str2);
+
+  return LCS->LLCS(\@hash1, \@hash2);
+}
+
+# calculates length of the nullable string
+sub calculate_length($) {
+  my $arg = shift;
+  if (defined($arg)) {
+    return length($arg);
+  }
+  return 0;
+}
+
 sub compare_fingerprints() {
   my $size = scalar @solutions;
-#  print "size = $size\n";
   for (my $i = 0; $i < $size; $i = $i + 1) {
-    print STDERR (($i/$size)*100)."%\n";
+    print STDERR (($i/$size)*100)."%\n"; # current progress
     my $s1ref = $solutions[$i];
-#    print "s1ref = $s1ref\n";
     my @sol1 = @{$s1ref};
     for (my $j = $i + 1; $j < $size; $j = $j + 1) {
       my $s2ref = $solutions[$j];
-#      print "s2ref = $s2ref \n";
       my @sol2 = @{$s2ref};
-#      print "sol[$i]: ".Dumper(@sol1);
-#      print "sol[$j]: ".Dumper(@sol2);
-      if (($sol1[0] eq $sol2[0]) and ($sol1[1] ne $sol2[1])) { # the same task, different authors
-        my @hash1 = split(//, $sol1[4]); # string to array
-        my @hash2 = split(//, $sol2[4]);
-        my $llcs = LCS->LLCS(\@hash1, \@hash2);
-        my $l1 = scalar @hash1;
-        my $l2 = scalar @hash2;
-        my $percentage = min(($llcs/$l1)*100, ($llcs/$l2)*100);
-        if ($percentage > 80) {
-          print "Coincidence: $sol1[0], $sol1[1], $sol2[1]: $percentage %\n";
-          print "sol1: $sol1[3]\n";
-          print "sol2: $sol2[3]\n";
-          print "hash1: $sol1[4]\n";
-          print "hash2: $sol2[4]\n";
+
+      my $task1 = $sol1[0];
+      my $task2 = $sol2[0];
+      next if ((grep( /^$task1$/, @tasks_to_skip)) or (grep( /^$task2$/, @tasks_to_skip)));
+      my $author1 = $sol1[1];
+      my $author2 = $sol2[1];
+ 
+      if (($task1 eq $task2) and ($author1 ne $author2)) {
+        my $statement1 = $sol1[4];
+        my $statement2 = $sol2[4];
+        my $formula1 = $sol1[5];
+        my $formula2 = $sol2[5];
+        my $time1 = Time::Piece->strptime($sol1[2],"%Y-%m-%d %H:%M:%S");
+        my $time2 = Time::Piece->strptime($sol2[2],"%Y-%m-%d %H:%M:%S");
+        my $l1 = calculate_length($statement1);
+        my $l2 = calculate_length($statement2);
+        my $l3 = calculate_length($formula1);
+        my $l4 = calculate_length($formula2);
+
+        my $sentence_llcs = calculate_llcs($statement1, $statement2);
+        my $formula_llcs = calculate_llcs($formula1, $formula2);
+        my $sentence_percentage = percentage($l1, $l2, $sentence_llcs);
+        my $formula_percentage = percentage($l3, $l4, $formula_llcs);
+        my $general_percentage = percentage($l1+$l3, $l2+$l4, $sentence_llcs+$formula_llcs);
+
+        if (($general_percentage >= 75) and (($l1 + $l3 > 30) or ($l2 + $l4 > 30))) {
+          if ($time1 < $time2) {
+            print "Coincidence: $task1 $author1 -> $author2 $general_percentage %\n";
+          } else {
+            print "Coincidence: $task1 $author2 -> $author1 $general_percentage %\n";
+          }
         }
       }
-#      print "$i <-> $j\n";
     }
   }
+}
+
+sub read_tasks_to_skip() {
+  my $file = $tasks_to_skip_filename;
+  open(my $in, '<:encoding(UTF-8)', $file) or return;
+
+  while (my $row = <$in>) {
+    chomp $row;
+    next if ($row =~ /\#/);
+    foreach my $buf (split(' ', $row)) {
+      push(@tasks_to_skip, $buf);
+    }
+  }
+  close($in) || die "Could't close file properly";
 }
 
 sub main()
@@ -297,12 +320,8 @@ sub main()
     die "Filename is not specified\n";
   }
   print "Working with the file $filename\n";
+  read_tasks_to_skip();
   parse_csv($filename);
-#  my ($s_ref, $f_ref) = parse_file($filename);
-#  filter_arrays($s_ref, $f_ref);
-#  my $hash = convert_arrays_to_hash($s_ref, $f_ref);
-#  print "$hash\n";
-#  print Dumper(@solutions);
   compare_fingerprints();
   exit 0;
 }
