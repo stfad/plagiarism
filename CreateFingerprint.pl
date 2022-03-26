@@ -19,6 +19,9 @@ my @tasks_to_skip = ();
 
 my $tasks_to_skip_filename = "trivialtasks.cfg";
 
+# calculates a pair of fingerprints (sentence_fingerprint, formula_fingerprint)
+# by the given string (field 'comment' from the CSV)
+# usage: create_fingerprint($comment)
 sub create_fingerprint($) {
   my $comment = shift;
   my @sentences = ();
@@ -58,9 +61,25 @@ sub create_fingerprint($) {
     undef($sentence_buf);
   }
   filter_arrays(\@sentences,\@formulas);
-  return merge_arrays(\@sentences,\@formulas); # returns statement string and formula string
+  return merge_arrays(\@sentences,\@formulas);
 }
 
+# this function filters arrays of sentences and formulas:
+# Sentences:
+## * remove "a", "the"
+## * remove signs, spaces
+## * remove TeX colors
+# Formulas:
+## * remove $
+## * remove TeX spaces: \! \; \ \quad \qquad
+## * remove TeX displaystyle command
+## * remove TeX colors
+## * all the greek symbols turned into G
+## * all the variables (Z,X,Y,W,U,V,A,B) turned into V
+## * all the indeces (J,K,N) turned into I
+## * remove spaces
+# All the letters turned into upper case
+# usage: filter_arrays($sentences_ref,$formulas_ref);
 sub filter_arrays($;$) {
   my $s_ref = shift;
   my $f_ref = shift;
@@ -161,6 +180,9 @@ sub filter_arrays($;$) {
   }
 }
 
+# merges arrays to be fingerprinted into two fingerprints
+# returns statement string and formula string
+# usage: merge_arrays($sentences_ref, $formulas_ref)
 sub merge_arrays($;$) {
   my $s_ref = shift;
   my $f_ref = shift;
@@ -174,6 +196,9 @@ sub merge_arrays($;$) {
   return $s_result, $f_result;
 }
 
+# reads *.csv file, writes *_new.csv file with the additional fingerprint columns,
+# inserts solutions into array for comparing
+# usage: parse_csv($filename);
 sub parse_csv($) {
   my $file = shift;
   if (index($file, ".csv") == -1) {
@@ -212,6 +237,7 @@ sub min($;$) {
 
 # calculates percentage for two nullable arguments
 # usage: percentage($l1, $l2, $llcs)
+# $llcs - length of the longest common subsequence
 sub percentage($;$;$) {
   my $arg1 = shift;
   my $arg2 = shift;
@@ -254,8 +280,13 @@ sub calculate_length($) {
   return 0;
 }
 
+# Runs through all pair of solutions, reports plagiarism to the .report-file
 sub compare_fingerprints() {
   my $size = scalar @solutions;
+  my $report_file = $filename;
+  $report_file =~ s/\.csv/\.report/;
+  open(my $out, '>:encoding(UTF-8)', $report_file) or die "Could not open file '$report_file' $!";
+
   for (my $i = 0; $i < $size; $i = $i + 1) {
     print STDERR (($i/$size)*100)."%\n"; # current progress
     my $s1ref = $solutions[$i];
@@ -290,16 +321,19 @@ sub compare_fingerprints() {
 
         if (($general_percentage >= 75) and (($l1 + $l3 > 30) or ($l2 + $l4 > 30))) {
           if ($time1 < $time2) {
-            print "Coincidence: $task1 $author1 -> $author2 $general_percentage %\n";
+            print $out "Coincidence: $task1 $author1 -> $author2 $general_percentage %\n";
           } else {
-            print "Coincidence: $task1 $author2 -> $author1 $general_percentage %\n";
+            print $out "Coincidence: $task1 $author2 -> $author1 $general_percentage %\n";
           }
         }
       }
     }
   }
+  close($out) || die "Could't close file properly";
 }
 
+# reads configation file
+# usage: read_tasks_to_skip()
 sub read_tasks_to_skip() {
   my $file = $tasks_to_skip_filename;
   open(my $in, '<:encoding(UTF-8)', $file) or return;
@@ -336,11 +370,11 @@ CreateFingerprint.pl - utility to calculate the percentage of plagiarism in solu
 
 =head1 SYNOPSIS
 
-Usage:
 CreateFingerprint.pl filename
 
 this script can work only with the CSV of this structure:
 
 task_number, author, create_date, comment
 
+As a result, you will get new csv with additional fingerprint columns and .report - file with plagiarism found
 =cut
